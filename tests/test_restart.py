@@ -32,6 +32,7 @@ class SnapshotlessArgvTest(unittest.TestCase):
                 {"testnet_dir": tmp}, env={"TESTNETDIR": tmp})
             argv = start_mod._node_argv(cfg, 21500, 9500, 0, tmp)
             self.assertNotIn("--operation-mode", argv)
+            self.assertIn("--disable-ansi-color", argv)
 
     def test_node_argv_with_snapshotless(self):
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))

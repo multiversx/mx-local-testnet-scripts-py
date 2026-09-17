@@ -47,6 +47,10 @@ def node_argv(
         "-sk-index", str(index),
         "-working-directory", workdir,
         "-config", "./config/config_validator.toml",
+        # Plain log lines (no ANSI color codes): the logs stay grep-able
+        # and trivially parseable (see logstats.py). Seednode/proxy do
+        # not define this flag, so it is only passed to the node binary.
+        "--disable-ansi-color",
     ]
     if snapshotless:
         argv += ["--operation-mode", "snapshotless-observer"]

@@ -136,9 +136,23 @@ ifdef MX_CHAIN_GO_DIR
 RESTART_ARGS += --mx-chain-go-dir $(MX_CHAIN_GO_DIR)
 endif
 
+LOGSTATS_ARGS :=
+ifdef NODE
+LOGSTATS_ARGS += --node $(NODE)
+endif
+ifdef ERROR_LINES
+LOGSTATS_ARGS += --max-errors $(ERROR_LINES)
+endif
+ifdef WARN_LINES
+LOGSTATS_ARGS += --max-warns $(WARN_LINES)
+endif
+ifdef MX_CHAIN_GO_DIR
+LOGSTATS_ARGS += --mx-chain-go-dir $(MX_CHAIN_GO_DIR)
+endif
+
 LOG_FILES = "$(TESTNETDIR)"/logs/*.log
 
-.PHONY: start stop status logs clean klogg test help tx-gen stop-tx-gen restart
+.PHONY: start stop status logs log-stats clean klogg test help tx-gen stop-tx-gen restart
 
 start: ## Start the testnet (seednode + validators + proxy).
 	$(PYTHON) $(SRC)/start.py $(START_ARGS)
@@ -155,7 +169,7 @@ stop-tx-gen: ## Stop only txgen (leave the testnet running).
 stop: ## Gracefully stop the testnet.
 	$(PYTHON) $(SRC)/stop.py
 
-status: ## Show whether the testnet processes are running.
+status: ## Show processes with live round/nonce/epoch.
 	$(PYTHON) $(SRC)/status.py
 
 logs: ## Show the tail of every testnet log file.
@@ -171,6 +185,9 @@ logs: ## Show the tail of every testnet log file.
 		echo "No log files under $(TESTNETDIR) yet. Run 'make start' first."; \
 		exit 1; \
 	fi
+
+log-stats: ## Counts per log file + ERROR/WARN lines (NODE=x, ERROR_LINES/WARN_LINES=0 to hide).
+	$(PYTHON) $(SRC)/logstats.py $(LOGSTATS_ARGS)
 
 clean: stop ## Stop the testnet and delete the whole testnet directory.
 	@if [ -z "$(TESTNETDIR)" ]; then echo "TESTNETDIR is empty, refusing to clean."; exit 1; fi
