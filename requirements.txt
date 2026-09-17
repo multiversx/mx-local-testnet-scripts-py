@@ -1,0 +1,7 @@
+# No runtime dependencies: the implementation uses only the Python 3
+# standard library (argparse, subprocess, logging, os, re, shutil, ...).
+#
+# Tests use the standard-library unittest framework, so nothing needs to
+# be installed to run them:
+#
+#   make test

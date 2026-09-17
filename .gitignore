@@ -1,0 +1,14 @@
+# Personal overrides (same convention as mx-chain-go's scripts/testnet/local.sh).
+local.sh
+
+# Python bytecode.
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtualenv.
+.venv/
+
+# IDE / tool scratch dirs.
+.idea/
+_trial_temp/
