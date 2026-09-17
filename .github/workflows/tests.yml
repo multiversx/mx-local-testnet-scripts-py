@@ -1,0 +1,30 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.11", "3.13"]
+    steps:
+      - name: Check out scripts
+        uses: actions/checkout@v4
+
+      - name: Clone mx-chain-go sibling checkout (tests drive it)
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/../../multiversx"
+          git clone --depth 1 https://github.com/multiversx/mx-chain-go.git \
+            "$GITHUB_WORKSPACE/../../multiversx/mx-chain-go"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run tests
+        run: make test
