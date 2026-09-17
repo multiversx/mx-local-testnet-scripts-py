@@ -93,7 +93,36 @@ def _edit(path: str, text: str) -> None:
     files.edit(path, text)
 
 
+def assert_sources_present(cfg: config.TestnetConfig) -> None:
+    """Fail fast when a required repo checkout is missing.
+
+    Without this, a missing sibling checkout (e.g. no
+    ``mx-chain-deploy-go`` next to ``mx-chain-go``) only surfaces later
+    as a cryptic ``go build`` failure with the wrong ``cwd``. Each error
+    tells the user exactly which ``git clone`` to run.
+    """
+    for path in (cfg.seednode_dir, cfg.node_dir, cfg.keygen_dir):
+        if not os.path.isdir(path):
+            raise proc.DaemonError(
+                config.missing_chain_source_message(path, cfg.repo_root)
+            )
+    for path, repo, env_key in (
+        (cfg.filegen_dir, config.REPO_DEPLOY_GO, "CONFIGGENERATORDIR"),
+        (cfg.proxy_dir, config.REPO_PROXY_GO, "PROXYDIR"),
+    ):
+        if not os.path.isdir(path):
+            raise proc.DaemonError(
+                config.missing_repo_message(
+                    path,
+                    repo,
+                    config.sibling_clone_dest(cfg.repo_root, repo),
+                    "set %s to its cmd/<tool> dir" % env_key,
+                )
+            )
+
+
 def build_all(cfg: config.TestnetConfig) -> None:
+    assert_sources_present(cfg)
     LOG.info("Building filegen...")
     proc.run(["go", "build", "-o", cfg.filegen_bin, "."], cfg.filegen_dir)
     LOG.info("Building seednode...")
@@ -425,6 +454,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 build_all(cfg)
             else:
                 LOG.info("Skipping build (--no-build).")
+                # Configs are still copied from the source checkouts
+                # below, so missing repos must fail here too (not just
+                # inside build_all).
+                assert_sources_present(cfg)
 
             generate_config(cfg)
             seed_address = setup_seednode(cfg)

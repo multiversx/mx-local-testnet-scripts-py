@@ -37,6 +37,34 @@ SCRIPTS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Name of the env var / CLI flag selecting the mx-chain-go checkout.
 CHAIN_GO_DIR_ENV = "MX_CHAIN_GO_DIR"
 
+# All sibling repos live under this GitHub org; missing-checkout errors
+# point here so users get a copy-pasteable `git clone` command.
+GITHUB_ORG_URL = "https://github.com/multiversx"
+
+REPO_CHAIN_GO = "mx-chain-go"
+REPO_DEPLOY_GO = "mx-chain-deploy-go"
+REPO_PROXY_GO = "mx-chain-proxy-go"
+REPO_TXGEN_GO = "mx-chain-txgen-go"
+
+
+def git_clone_hint(repo: str, dest: Optional[str] = None) -> str:
+    """Return a copy-pasteable ``git clone`` hint for a missing checkout."""
+    cmd = "git clone %s/%s.git" % (GITHUB_ORG_URL, repo)
+    if dest:
+        cmd += " %s" % dest
+    return "you should run: %s" % cmd
+
+
+def missing_repo_message(
+    path: str, repo: str, dest: Optional[str] = None, extra: str = ""
+) -> str:
+    """Build the error body for a missing repo checkout at ``path``."""
+    message = "required %s checkout not found: %s" % (repo, path)
+    if extra:
+        message += " (%s)" % extra
+    message += ". %s" % git_clone_hint(repo, dest)
+    return message
+
 
 def _workspace_github_dir() -> str:
     # <workspace>/github.com/<org>/<repo> -> <workspace>/github.com
@@ -69,7 +97,9 @@ def resolve_chain_root(
         root = os.path.expanduser(explicit)
         if not os.path.isdir(os.path.join(root, "cmd", "node")):
             raise ConfigError(
-                "not an mx-chain-go checkout (no cmd/node): %s" % root
+                "not an mx-chain-go checkout (no cmd/node): %s. Check "
+                "--mx-chain-go-dir / %s, or %s"
+                % (root, CHAIN_GO_DIR_ENV, git_clone_hint(REPO_CHAIN_GO))
             )
         return root
     for candidate in default_chain_roots():
@@ -77,7 +107,12 @@ def resolve_chain_root(
             return candidate
     raise ConfigError(
         "no mx-chain-go checkout found (tried %s). Set --mx-chain-go-dir "
-        "or %s." % (", ".join(default_chain_roots()), CHAIN_GO_DIR_ENV)
+        "or %s. %s."
+        % (
+            ", ".join(default_chain_roots()),
+            CHAIN_GO_DIR_ENV,
+            git_clone_hint(REPO_CHAIN_GO, default_chain_roots()[0]),
+        )
     )
 
 
@@ -174,6 +209,21 @@ def _sibling_checkout(chain_root: str, repo: str) -> str:
 def _default_txgen_dir(repo_root: str) -> str:
     """Locate ``mx-chain-txgen-go/cmd/txgen`` next to the chain repo."""
     return os.path.join(_sibling_checkout(repo_root, "mx-chain-txgen-go"), "cmd", "txgen")
+
+
+def sibling_clone_dest(chain_root: str, repo: str) -> str:
+    """Where ``repo`` should be cloned (sibling of the chain checkout)."""
+    return os.path.join(os.path.dirname(chain_root), repo)
+
+
+def missing_chain_source_message(path: str, chain_root: str) -> str:
+    """Error body for a source dir missing inside the mx-chain-go checkout."""
+    return (
+        "required mx-chain-go source not found: %s "
+        "(mx-chain-go checkout at %s looks incomplete). %s "
+        "(or repair it with `git -C %s pull`)"
+        % (path, chain_root, git_clone_hint(REPO_CHAIN_GO), chain_root)
+    )
 
 
 def _non_empty(mapping: Mapping[str, Optional[str]], key: str) -> Optional[str]:

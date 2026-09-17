@@ -30,6 +30,14 @@ import services
 
 LOG = logging.getLogger("txgen")
 
+# mx-chain-txgen-go is a private repo: txgen is an optional load generator,
+# never required by start/stop/status/restart. Missing-checkout errors say
+# so explicitly, so users without access know they can just skip it.
+_TXGEN_OPTIONAL_NOTE = (
+    "Txgen is optional (private repo) -- the testnet runs fine without "
+    "it; skip `make tx-gen` if you don't have access."
+)
+
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -112,8 +120,17 @@ def _assert_txgen_port_free(cfg: config.TestnetConfig) -> None:
 def build_txgen(cfg: config.TestnetConfig) -> None:
     if not os.path.isdir(cfg.txgen_dir):
         raise proc.DaemonError(
-            "txgen source not found: %s. Clone mx-chain-txgen-go next to "
-            "mx-chain-go or set TXGENDIR / --txgen-dir." % cfg.txgen_dir
+            "%s. %s"
+            % (
+                config.missing_repo_message(
+                    cfg.txgen_dir,
+                    config.REPO_TXGEN_GO,
+                    config.sibling_clone_dest(
+                        cfg.repo_root, config.REPO_TXGEN_GO),
+                    "set TXGENDIR / --txgen-dir to its cmd/txgen dir",
+                ),
+                _TXGEN_OPTIONAL_NOTE,
+            )
         )
     LOG.info("Building txgen...")
     proc.run(["go", "build", "-o", cfg.txgen_bin, "."], cfg.txgen_dir)
@@ -121,6 +138,20 @@ def build_txgen(cfg: config.TestnetConfig) -> None:
 
 def setup_txgen(cfg: config.TestnetConfig) -> None:
     """Copy + rewire the txgen configs (mirrors ``copyTxGenConfig``)."""
+    if not os.path.isdir(cfg.txgen_dir):
+        raise proc.DaemonError(
+            "%s. %s"
+            % (
+                config.missing_repo_message(
+                    cfg.txgen_dir,
+                    config.REPO_TXGEN_GO,
+                    config.sibling_clone_dest(
+                        cfg.repo_root, config.REPO_TXGEN_GO),
+                    "set TXGENDIR / --txgen-dir to its cmd/txgen dir",
+                ),
+                _TXGEN_OPTIONAL_NOTE,
+            )
+        )
     node_cfg = os.path.join(cfg.testnet_dir, "node", "config")
     for name in ("economics.toml", "walletKey.pem", "enableEpochs.toml"):
         if not os.path.isfile(os.path.join(node_cfg, name)):
@@ -134,7 +165,20 @@ def setup_txgen(cfg: config.TestnetConfig) -> None:
 
     src_cfg = os.path.join(cfg.txgen_dir, "config")
     if not os.path.isfile(os.path.join(src_cfg, "config.toml")):
-        raise proc.DaemonError("missing config.toml in %s" % src_cfg)
+        raise proc.DaemonError(
+            "missing config.toml in %s (txgen checkout at %s looks "
+            "incomplete). %s. %s"
+            % (
+                src_cfg,
+                cfg.txgen_dir,
+                config.git_clone_hint(
+                    config.REPO_TXGEN_GO,
+                    config.sibling_clone_dest(
+                        cfg.repo_root, config.REPO_TXGEN_GO),
+                ),
+                _TXGEN_OPTIONAL_NOTE,
+            )
+        )
     files.copy(os.path.join(src_cfg, "config.toml"), txgen_cfg)
     files.copy(os.path.join(src_cfg, "sc.toml"), txgen_cfg)
     files.copy_glob(os.path.join(src_cfg, "*.wasm"), txgen_cfg)
