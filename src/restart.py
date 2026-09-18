@@ -310,12 +310,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("error: %s" % exc, file=sys.stderr)
         return 1
 
-    os.makedirs(cfg.log_dir, exist_ok=True)
-    file_handler = logging.FileHandler(
-        os.path.join(cfg.log_dir, "launcher.log"), encoding="utf-8")
-    file_handler.setFormatter(logging.Formatter(
-        "%(asctime)s %(levelname)-5s [%(name)s] %(message)s"))
-    logging.getLogger().addHandler(file_handler)
+    services.setup_launcher_log(cfg)
 
     try:
         if args.node:

@@ -13,6 +13,31 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import proc
 
 
+class _FastHTTPServer:
+    """ThreadingHTTPServer that skips getfqdn() reverse-DNS on bind.
+
+    http.server resolves the bind address via getfqdn(), which stalls for
+    tens of seconds on machines with broken DNS. Tests only need IP:port.
+    """
+
+    pass
+
+
+def _make_fast_http_server(handler_class):
+    """Return a ThreadingHTTPServer subclass using *handler_class*."""
+    from http.server import ThreadingHTTPServer
+    import socketserver
+
+    class FastHTTPServer(ThreadingHTTPServer):
+        def server_bind(self):
+            socketserver.TCPServer.server_bind(self)
+            host, port = self.socket.getsockname()[:2]
+            self.server_name = host
+            self.server_port = port
+
+    return FastHTTPServer
+
+
 class NameTest(unittest.TestCase):
     def test_validator_index(self):
         self.assertEqual(proc.validator_index_from_name("validator0"), 0)
@@ -230,6 +255,229 @@ class StatusTest(unittest.TestCase):
             states = {row[0]: row[1] for row in status_mod.collect_status(cfg)}
             self.assertTrue(states["validator3"])
             self.assertFalse(states["proxy"])
+
+
+class StatusDetailsTest(unittest.TestCase):
+    def _cfg(self, tmp):
+        import config as config_mod
+        return config_mod.load_config(
+            {"testnet_dir": tmp}, env={"TESTNETDIR": tmp})
+
+    def test_describe_validator_roles_and_ports(self):
+        import status as status_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            # Default topology from variables.sh is 2 shards; metachain
+            # validators take the first indices (see validator_slots).
+            meta = status_mod.describe_process(cfg, "validator0")
+            self.assertIn("meta", meta)
+            self.assertIn(str(cfg.validator_p2p_port(0)), meta)
+            self.assertIn(str(cfg.validator_rest_port(0)), meta)
+            shard = status_mod.describe_process(
+                cfg, "validator%d" % cfg.meta_validator_count)
+            self.assertIn("shard 0", shard)
+            extra = status_mod.describe_process(cfg, "validator9999")
+            self.assertIn("extra", extra)
+
+    def test_describe_services(self):
+        import status as status_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            self.assertEqual("", status_mod.describe_process(cfg, "seednode"))
+            self.assertEqual("", status_mod.describe_process(cfg, "txgen"))
+            self.assertIn(str(cfg.proxy_port),
+                          status_mod.describe_process(cfg, "proxy"))
+            self.assertEqual("", status_mod.describe_process(cfg, "nope"))
+
+    def test_node_liveness_missing_keys(self):
+        import status as status_mod
+
+        self.assertEqual(
+            "round=- nonce=- epoch=-", status_mod.node_liveness({}))
+        self.assertEqual(
+            "round=120 nonce=42 epoch=3",
+            status_mod.node_liveness({"data": {"metrics": {
+                "erd_nonce": 42,
+                "erd_current_round": 120,
+                "erd_epoch_number": 3,
+            }}}))
+
+    def test_node_shard_id(self):
+        import status as status_mod
+
+        metrics = lambda shard: {"data": {"metrics": {"erd_shard_id": shard}}}
+        self.assertEqual(2, status_mod.node_shard_id(metrics(2)))
+        self.assertEqual(4294967295,
+                         status_mod.node_shard_id(metrics(4294967295)))
+        self.assertEqual(1, status_mod.node_shard_id(metrics("1")))
+        self.assertIsNone(status_mod.node_shard_id({}))
+        self.assertIsNone(status_mod.node_shard_id(metrics(True)))
+        self.assertIsNone(status_mod.node_shard_id(metrics("shard-2")))
+
+    def test_describe_prefers_live_shard(self):
+        import status as status_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            # validator9999 has no slot in any topology...
+            self.assertIn("extra",
+                          status_mod.describe_process(cfg, "validator9999"))
+            # ...but the node's own report wins when reachable.
+            self.assertIn(
+                "shard 2",
+                status_mod.describe_process(cfg, "validator9999",
+                                            live_shard=2))
+            self.assertIn(
+                "meta",
+                status_mod.describe_process(
+                    cfg, "validator9999",
+                    live_shard=cfg.metashard_id))
+
+    def test_probe_stopped_is_empty(self):
+        import dataclasses
+        import status as status_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            cfg = dataclasses.replace(cfg, proxy_port=47951)
+            self.assertEqual(
+                ("", None), status_mod.probe_process(cfg, "proxy", False))
+
+    def test_probe_down_reports_down(self):
+        import dataclasses
+        import socket
+        import status as status_mod
+
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        closed = probe.getsockname()[1]
+        probe.close()
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            cfg = dataclasses.replace(cfg, proxy_port=closed)
+            detail, live_shard = status_mod.probe_process(
+                cfg, "proxy", True, timeout=1.0)
+            self.assertIn("api DOWN", detail)
+            self.assertIsNone(live_shard)
+
+    def test_probe_validator_reports_nonce(self):
+        import dataclasses
+        import json
+        import threading
+        from http.server import BaseHTTPRequestHandler
+        import status as status_mod
+
+        payload = {"data": {"metrics": {
+            "erd_nonce": 7,
+            "erd_current_round": 50,
+            "erd_epoch_number": 1,
+            "erd_shard_id": 2,
+        }}}
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802 (stdlib handler naming)
+                body = json.dumps(payload).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        FastHTTPServer = _make_fast_http_server(Handler)
+        server = FastHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                cfg = self._cfg(tmp)
+                cfg = dataclasses.replace(
+                    cfg,
+                    validator_rest_origin=server.server_address[1],
+                )
+                result = status_mod.probe_process(
+                    cfg, "validator0", True, timeout=2.0)
+                detail, live_shard = result
+                self.assertNotIn("api UP", detail)
+                self.assertIn("nonce=7", detail)
+                self.assertIn("round=50", detail)
+                self.assertIn("epoch=1", detail)
+                self.assertEqual(2, live_shard)
+        finally:
+            server.shutdown()
+            thread.join()
+
+    def test_probe_all_probes_concurrently(self):
+        import dataclasses
+        import json
+        import threading
+        from http.server import BaseHTTPRequestHandler
+        import status as status_mod
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802 (stdlib handler naming)
+                body = json.dumps({"data": {"metrics": {
+                    "erd_nonce": 9,
+                    "erd_current_round": 51,
+                    "erd_epoch_number": 2,
+                    "erd_shard_id": 1,
+                }}}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        FastHTTPServer = _make_fast_http_server(Handler)
+        server = FastHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                cfg = self._cfg(tmp)
+                cfg = dataclasses.replace(
+                    cfg,
+                    validator_rest_origin=server.server_address[1],
+                )
+                rows = [("validator0", True, 1234), ("proxy", False, None)]
+                probes = status_mod.probe_all(cfg, rows, timeout=2.0)
+                detail, live_shard = probes["validator0"]
+                self.assertIn("round=51 nonce=9 epoch=2", detail)
+                self.assertEqual(1, live_shard)
+                self.assertEqual(("", None), probes["proxy"])
+                self.assertEqual({}, status_mod.probe_all(cfg, []))
+        finally:
+            server.shutdown()
+            thread.join()
+
+    def test_main_labels_from_live_shard(self):
+        # End-to-end through main(): validator9 is "extra" by default
+        # flags, but the probe reports shard 2, so that is displayed.
+        from unittest import mock
+        import io
+        import status as status_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "pids"))
+            with open(os.path.join(tmp, "pids", "validator9.pid"),
+                      "w") as handle:
+                handle.write("%d\n" % os.getpid())
+            canned = {"validator9": ("round=5 nonce=9 epoch=0", 2)}
+            with mock.patch.object(status_mod, "probe_all",
+                                   return_value=canned):
+                with mock.patch("sys.stdout",
+                                new_callable=io.StringIO) as out:
+                    rc = status_mod.main(["--testnet-dir", tmp])
+            self.assertEqual(0, rc)
+            self.assertIn("shard 2", out.getvalue())
+            self.assertNotIn("extra", out.getvalue())
 
 
 class StopOneTest(unittest.TestCase):

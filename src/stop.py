@@ -17,6 +17,7 @@ from typing import List, Optional
 
 import config
 import proc
+import services
 
 LOG = logging.getLogger("stop")
 
@@ -36,22 +37,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 
 def service_ports(cfg: config.TestnetConfig, name: str) -> List[int]:
-    """Return the sweep ports for a single process name.
-
-    Validators listen on two TCP ports (p2p + REST); both are swept
-    so a stale process is reaped even if one port was rebound. Every
-    other service listens on exactly one port.
-    """
-    if name == "txgen":
-        return [cfg.txgen_port]
-    if name == "proxy":
-        return [cfg.proxy_port]
-    if name == "seednode":
-        return [cfg.seednode_port]
-    index = proc.validator_index_from_name(name)
-    if index is not None:
-        return [cfg.validator_p2p_port(index), cfg.validator_rest_port(index)]
-    raise proc.DaemonError("unknown process: %r" % name)
+    """Return the sweep ports for a single process name."""
+    return services.service_ports(cfg, name)
 
 
 def service_port(cfg: config.TestnetConfig, name: str) -> int:
@@ -107,19 +94,8 @@ def stop_all(cfg: config.TestnetConfig) -> None:
             name = pidfile[: -len(".pid")]
             path = os.path.join(cfg.pid_dir, pidfile)
             proc.kill_by_pidfile(name, path)
-            # Sweep the port(s) too: pidfile names encode them.
-            # kill_by_port is LISTEN-only, so peers connected to a
-            # validator are never touched — only the listener dies.
-            index = proc.validator_index_from_name(name)
-            if index is not None:
-                proc.kill_by_port(cfg.validator_p2p_port(index))
-                proc.kill_by_port(cfg.validator_rest_port(index))
-            elif name == "seednode":
-                proc.kill_by_port(cfg.seednode_port)
-            elif name == "proxy":
-                proc.kill_by_port(cfg.proxy_port)
-            elif name == "txgen":
-                proc.kill_by_port(cfg.txgen_port)
+            for port in service_ports(cfg, name):
+                proc.kill_by_port(port)
 
     # Fallback sweep over every known port (covers custom topologies whose
     # pidfiles are already gone).

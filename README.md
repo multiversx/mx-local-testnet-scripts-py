@@ -162,8 +162,15 @@ scratch testnet.
 make status
 ```
 
-Prints one line per expected process (`RUNNING (pid …)` / `STOPPED`).
-Exits 0 when everything is up, 1 otherwise.
+Prints one line per expected process (`RUNNING (pid …)` / `STOPPED`)
+with per-node details: validators show their role (`meta` / `shard N`),
+p2p and REST ports, plus their live `round`/`nonce`/`epoch` probed from
+the REST API. The role comes from the node's self-reported shard id when
+reachable, so labels stay right even if status runs with different flags
+than start; proxy shows its URL, seednode/txgen show no extra detail —
+a failed validator/proxy probe (`api DOWN`) still prints and exits 1,
+catching processes that are alive but wedged. Probes run
+concurrently, so the worst case is ~one timeout, not one per process.
 
 ## How to restart a node
 
@@ -192,7 +199,15 @@ flag run normally again.
 
 ```sh
 make logs                         # tail of every log file
+make log-stats                    # level counts per file + ERROR/WARN lines
+make log-stats NODE=validator2    # only one node's log file
+make log-stats ERROR_LINES=0 WARN_LINES=0  # counts only, hide lines
 ```
+
+`log-stats` understands plain lines (`INFO [...]`) and proxy-style
+lines (`ERROR[...]`). `launcher.log` (the tool's own output) is always
+skipped. Anything without a leading level — Go stack traces, ASCII
+tables, `[GIN-debug]` gin chatter — lands in `OTHER`.
 
 - Every process logs to `<testnet>/logs/<name>.log`
   (`validator<N>.log`, `seednode.log`, `proxy.log`, `txgen.log`;
@@ -224,7 +239,7 @@ when the mx-chain-go checkout is absent.
 ## Project layout
 
 ```text
-Makefile            start/stop/status/logs/clean/klogg/test/tx-gen/stop-tx-gen/restart
+Makefile            start/stop/status/logs/log-stats/clean/klogg/test/tx-gen/stop-tx-gen/restart
 requirements.txt    stdlib only — nothing to install
 README.md           this file
 src/
@@ -240,6 +255,7 @@ src/
   start.py          CLI + orchestration (build → generate → configure → launch)
   stop.py           CLI + stop orchestration (also reused by start --clean)
   status.py         CLI status report
+  logstats.py       CLI log-level counts per file (used by log-stats)
   restart.py        single-node graceful restart (interactive list or --node)
   txgen.py          CLI + txgen orchestration (build → configure → launch)
 tests/
