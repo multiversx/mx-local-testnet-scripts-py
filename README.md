@@ -204,14 +204,10 @@ make log-stats NODE=validator2    # only one node's log file
 make log-stats ERROR_LINES=0 WARN_LINES=0  # counts only, hide lines
 ```
 
-`log-stats` understands both plain lines (`INFO [...]`, proxy style
-`ERROR[...]`) and the node's colorized lines (`ESC[0;32mINFO ESC[0m[...]`),
-plus the Python format of `launcher.log`. Validators are started with
-the node's `--disable-ansi-color` flag so fresh logs are plain and
-grep-able; older/colored logs (and seednode, whose binary has no such
-flag) are stripped while parsing. Anything without a leading level —
-Go stack traces, ASCII tables, `[GIN-debug]` gin chatter — lands in
-`OTHER`.
+`log-stats` understands plain lines (`INFO [...]`) and proxy-style
+lines (`ERROR[...]`). `launcher.log` (the tool's own output) is always
+skipped. Anything without a leading level — Go stack traces, ASCII
+tables, `[GIN-debug]` gin chatter — lands in `OTHER`.
 
 - Every process logs to `<testnet>/logs/<name>.log`
   (`validator<N>.log`, `seednode.log`, `proxy.log`, `txgen.log`;

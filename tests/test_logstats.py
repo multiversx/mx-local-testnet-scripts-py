@@ -35,36 +35,23 @@ class CountLevelsTest(unittest.TestCase):
         self.assertEqual(counts["TRACE"], 0)
         self.assertEqual(counts["OTHER"], 1)
 
-    def test_counts_colored_node_format(self):
-        # Real node output wraps the level in ANSI color codes and pads
-        # INFO/WARN with a space; the proxy omits the space entirely.
+    def test_counts_proxy_format(self):
+        # The proxy omits the space: ERROR[...] instead of ERROR [...]
         body = (
-            "\x1b[0;36mDEBUG\x1b[0m[2026-09-17 17:39:09.971] [main]  [/0/0/] x\n"
-            "\x1b[0;32mINFO \x1b[0m[2026-09-17 17:39:09.971] [main]  [/0/0/] y\n"
-            "\x1b[0;33mWARN \x1b[0m[2026-09-17 17:39:09.971] [main]  [/0/0/] z\n"
-            "\x1b[0;31mERROR\x1b[0m[2026-09-17 17:39:09.971] [main]  [/0/0/] w\n"
-            "ERROR[2026-09-17 17:39:35.663]   proxy style, no space\n"
+            "DEBUG[2026-09-17 17:39:09.971] [main]  [/0/0/] x\n"
+            "INFO[2026-09-17 17:39:09.971] [main]  [/0/0/] y\n"
+            "WARN[2026-09-17 17:39:09.971] [main]  [/0/0/] z\n"
+            "ERROR[2026-09-17 17:39:09.971] [main]  [/0/0/] w\n"
+            "ERROR[2026-09-17 17:39:35.663]   another error\n"
         )
         with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "validator0.log")
+            path = os.path.join(tmp, "proxy.log")
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write(body)
             counts = logstats.count_levels(path)
         self.assertEqual(
             counts, {"ERROR": 2, "WARN": 1, "INFO": 1, "DEBUG": 1,
                      "TRACE": 0, "OTHER": 0})
-
-    def test_counts_launcher_format(self):
-        body = ("2026-09-17 17:38:45,144 INFO  [start] building...\n"
-                "2026-09-17 17:38:45,144 WARNING  [start] careful\n")
-        with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "launcher.log")
-            with open(path, "w", encoding="utf-8") as handle:
-                handle.write(body)
-            counts = logstats.count_levels(path)
-        self.assertEqual(counts["INFO"], 1)
-        self.assertEqual(counts["WARN"], 1)
-        self.assertEqual(counts["OTHER"], 0)
 
     def test_missing_file_is_zero(self):
         with self.assertLogs(level="WARNING"):
@@ -87,6 +74,17 @@ class CollectCountsTest(unittest.TestCase):
             self.assertEqual([n for n, _c in only], ["validator1.log"])
             missing = logstats.collect_counts(tmp, node="validator9")
             self.assertEqual(missing, [])
+
+    def test_launcher_log_excluded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "launcher.log"), "w",
+                      encoding="utf-8") as handle:
+                handle.write("INFO [t] [l]  [c] hi\n")
+            with open(os.path.join(tmp, "validator0.log"), "w",
+                      encoding="utf-8") as handle:
+                handle.write("INFO [t] [l]  [c] hi\n")
+            rows = logstats.collect_counts(tmp)
+            self.assertEqual([n for n, _c in rows], ["validator0.log"])
 
 
 class RenderTest(unittest.TestCase):
@@ -142,17 +140,6 @@ class ErrorLinesTest(unittest.TestCase):
         self.assertTrue(lines[0].endswith("..."))
         self.assertLessEqual(len(lines[0]),
                              logstats.MAX_ERROR_LINE_LEN + 3)
-
-    def test_collects_colored_error_lines(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            self._write(tmp, "validator0.log",
-                        "\x1b[0;31mERROR\x1b[0m[t] [l]  [c] colored boom\n"
-                        "INFO [t] [l]  [c] fine\n")
-            rows = logstats.collect_error_lines(tmp)
-        _name, lines, _hidden = rows[0]
-        self.assertEqual(len(lines), 1)
-        self.assertIn("colored boom", lines[0])
-        self.assertNotIn("\x1b", lines[0])
 
     def test_collects_warn_lines(self):
         with tempfile.TemporaryDirectory() as tmp:

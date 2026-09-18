@@ -12,12 +12,13 @@ Node log lines look like::
 
     ERROR [2025-04-29 07:46:37.102] [logger]  [shard/epoch/round/...] message
 
-but the node binary colorizes the level (``ESC[0;36mDEBUGESC[0m[...]``),
-the proxy omits the space (``ERROR[...]``) and ``launcher.log`` uses
-Python logging (``2026-09-17 17:38:45,144 INFO  [start] ...``) — all of
-these count. Only a leading level token counts: an ``ERROR`` appearing
-inside a message body, a Go stack trace, an ASCII table row or a
-``[GIN-debug]`` gin-framework line does not, and falls into ``OTHER``.
+and the proxy omits the space (``ERROR[...]``). Only a leading level
+token counts: an ``ERROR`` appearing inside a message body, a Go stack
+trace, an ASCII table row or a ``[GIN-debug]`` gin-framework line does
+not, and falls into ``OTHER``.
+
+``launcher.log`` (the tool's own orchestration output) is always
+skipped.
 
 Exit code is 0 even when errors are found (this is a report, not a
 health check); 1 only when there are no log files to scan.
@@ -40,31 +41,18 @@ LOG = logging.getLogger("logstats")
 LEVELS = ("ERROR", "WARN", "INFO", "DEBUG", "TRACE")
 
 _LINE_RE = re.compile(r"^(ERROR|WARN|INFO|DEBUG|TRACE)\s*\[")
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
-_LAUNCHER_RE = re.compile(
-    r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2},\d+\s+"
-    r"(DEBUG|INFO|WARNING|ERROR|CRITICAL)\b")
 
 
 def level_of(line: str):
     """Return the log level of one line, or None when it has none.
 
-    ANSI color codes are stripped first (the node binary colorizes the
-    level); besides ``LEVEL [...]`` this also accepts the ``launcher.log``
-    Python-logging format (``WARNING`` maps to ``WARN``).
+    Only a leading ``LEVEL [...]`` token counts; the ``launcher.log``
+    Python-logging format is not recognised (that file is the tool's
+    own output and is skipped by the scanner).
     """
-    stripped = _ANSI_RE.sub("", line)
-    match = _LINE_RE.match(stripped)
+    match = _LINE_RE.match(line)
     if match:
         return match.group(1)
-    match = _LAUNCHER_RE.match(stripped)
-    if match:
-        level = match.group(1)
-        if level == "WARNING":
-            return "WARN"
-        if level == "CRITICAL":
-            return "ERROR"
-        return level
     return None
 
 # Lines shown per file for the ERROR/WARN report sections
@@ -110,22 +98,25 @@ def count_levels(path: str) -> Dict[str, int]:
     return counts
 
 
-def collect_counts(log_dir: str, node: Optional[str] = None):
-    """Return ``[(filename, counts)]`` sorted by filename."""
-    if node:
-        paths = [os.path.join(log_dir, "%s.log" % node)]
-        paths = [p for p in paths if os.path.isfile(p)]
-    else:
-        paths = sorted(glob.glob(os.path.join(log_dir, "*.log")))
-    return [(os.path.basename(p), count_levels(p)) for p in paths]
-
-
 def _resolve_paths(log_dir: str, node: Optional[str] = None) -> List[str]:
-    """Return sorted log paths to scan (single-file when ``node`` is set)."""
+    """Return sorted log paths to scan (single-file when ``node`` is set).
+
+    ``launcher.log`` (the tool's own orchestration output) is always
+    excluded — it is not useful for diagnosing node issues.
+    """
     if node:
         paths = [os.path.join(log_dir, "%s.log" % node)]
         return [p for p in paths if os.path.isfile(p)]
-    return sorted(glob.glob(os.path.join(log_dir, "*.log")))
+    return sorted(
+        p for p in glob.glob(os.path.join(log_dir, "*.log"))
+        if os.path.basename(p) != "launcher.log"
+    )
+
+
+def collect_counts(log_dir: str, node: Optional[str] = None):
+    """Return ``[(filename, counts)]`` sorted by filename."""
+    return [(os.path.basename(p), count_levels(p))
+            for p in _resolve_paths(log_dir, node)]
 
 
 def collect_level_lines(log_dir: str, node: Optional[str] = None,
@@ -134,9 +125,9 @@ def collect_level_lines(log_dir: str, node: Optional[str] = None,
     """Return ``[(filename, lines, hidden)]`` for files with ``level`` lines.
 
     ``lines`` holds up to ``max_per_file`` raw lines (stripped of the
-    trailing newline, color codes removed, overlong lines trimmed);
-    ``hidden`` is the number of further lines not shown. Files without
-    such lines are skipped. Streamed one pass per file; never raises.
+    trailing newline, overlong lines trimmed); ``hidden`` is the number
+    of further lines not shown. Files without such lines are skipped.
+    Streamed one pass per file; never raises.
     """
     rows = []
     for path in _resolve_paths(log_dir, node):
@@ -148,8 +139,7 @@ def collect_level_lines(log_dir: str, node: Optional[str] = None,
                     if level_of(line) != level:
                         continue
                     if len(lines) < max_per_file:
-                        # Strip color codes so piped output stays readable.
-                        lines.append(_trim_line(_ANSI_RE.sub("", line)))
+                        lines.append(_trim_line(line))
                     else:
                         hidden += 1
         except OSError as exc:
