@@ -18,6 +18,7 @@ the ``start`` CLI.
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import Dict, List, Tuple
@@ -152,6 +153,35 @@ def pidfile_validator_indices(cfg: config.TestnetConfig) -> List[int]:
 def slot_by_index(cfg: config.TestnetConfig) -> Dict[int, Tuple[str, int]]:
     """Map validator index -> (kind, shard) for the configured slots."""
     return {index: (kind, shard) for index, kind, shard in cfg.validator_slots()}
+
+
+def setup_launcher_log(cfg: config.TestnetConfig) -> None:
+    """Attach a file handler writing to ``<log_dir>/launcher.log``."""
+    os.makedirs(cfg.log_dir, exist_ok=True)
+    file_handler = logging.FileHandler(
+        os.path.join(cfg.log_dir, "launcher.log"), encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-5s [%(name)s] %(message)s"))
+    logging.getLogger().addHandler(file_handler)
+
+
+def service_ports(cfg: config.TestnetConfig, name: str) -> List[int]:
+    """Return the sweep ports for a single process name.
+
+    Validators listen on two TCP ports (p2p + REST); both are swept
+    so a stale process is reaped even if one port was rebound. Every
+    other service listens on exactly one port.
+    """
+    if name == "txgen":
+        return [cfg.txgen_port]
+    if name == "proxy":
+        return [cfg.proxy_port]
+    if name == "seednode":
+        return [cfg.seednode_port]
+    index = proc.validator_index_from_name(name)
+    if index is not None:
+        return [cfg.validator_p2p_port(index), cfg.validator_rest_port(index)]
+    raise proc.DaemonError("unknown process: %r" % name)
 
 
 def validator_names(cfg: config.TestnetConfig) -> List[str]:

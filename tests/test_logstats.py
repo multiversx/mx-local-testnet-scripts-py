@@ -13,6 +13,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import logstats
 
 
+def _cfg(tmp):
+    import config as config_mod
+    return config_mod.load_config(
+        {"testnet_dir": tmp}, env={"TESTNETDIR": tmp})
+
+
 SAMPLE = """\
 ERROR [2025-04-29 07:46:37.102] [transactions]  [0/4/805/(END_ROUND)] something broke
 WARN [2025-04-29 07:46:38.102] [process]  [metachain/13/2648/(START_ROUND)] slow round
@@ -166,11 +172,8 @@ class MainTest(unittest.TestCase):
         self.assertEqual(1, rc)
 
     def test_reports_counts(self):
-        import config as config_mod
-
         with tempfile.TemporaryDirectory() as tmp:
-            cfg = config_mod.load_config(
-                {"testnet_dir": tmp}, env={"TESTNETDIR": tmp})
+            cfg = _cfg(tmp)
             os.makedirs(cfg.log_dir, exist_ok=True)
             with open(os.path.join(cfg.log_dir, "proxy.log"), "w",
                       encoding="utf-8") as handle:
@@ -183,11 +186,8 @@ class MainTest(unittest.TestCase):
         self.assertIn("ERROR", out.getvalue())
 
     def test_main_prints_error_lines(self):
-        import config as config_mod
-
         with tempfile.TemporaryDirectory() as tmp:
-            cfg = config_mod.load_config(
-                {"testnet_dir": tmp}, env={"TESTNETDIR": tmp})
+            cfg = _cfg(tmp)
             os.makedirs(cfg.log_dir, exist_ok=True)
             with open(os.path.join(cfg.log_dir, "validator0.log"), "w",
                       encoding="utf-8") as handle:
@@ -205,11 +205,8 @@ class MainTest(unittest.TestCase):
         self.assertIn("slow round", body)
 
     def test_main_max_errors_zero_hides_lines(self):
-        import config as config_mod
-
         with tempfile.TemporaryDirectory() as tmp:
-            cfg = config_mod.load_config(
-                {"testnet_dir": tmp}, env={"TESTNETDIR": tmp})
+            cfg = _cfg(tmp)
             os.makedirs(cfg.log_dir, exist_ok=True)
             with open(os.path.join(cfg.log_dir, "validator0.log"), "w",
                       encoding="utf-8") as handle:

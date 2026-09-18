@@ -69,30 +69,6 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _copy(src: str, dst: str) -> None:
-    # Backward-compat alias (new code uses files.copy directly).
-    files.copy(src, dst)
-
-
-def _copy_glob(pattern: str, dst_dir: str) -> None:
-    # Backward-compat alias (new code uses files.copy_glob directly).
-    files.copy_glob(pattern, dst_dir)
-
-
-def _read(path: str) -> str:
-    # Backward-compat alias (new code uses files.read directly).
-    return files.read(path)
-
-
-def _write(path: str, text: str) -> None:
-    # Backward-compat alias (new code uses files.write directly).
-    files.write(path, text)
-
-
-def _edit(path: str, text: str) -> None:
-    files.edit(path, text)
-
-
 def assert_sources_present(cfg: config.TestnetConfig) -> None:
     """Fail fast when a required repo checkout is missing.
 
@@ -399,13 +375,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(config.format_print_config(cfg))
         return 0
 
-    os.makedirs(cfg.log_dir, exist_ok=True)
-    file_handler = logging.FileHandler(
-        os.path.join(cfg.log_dir, "launcher.log"), encoding="utf-8")
-    file_handler.setFormatter(logging.Formatter(
-        "%(asctime)s %(levelname)-5s [%(name)s] %(message)s"))
-    root = logging.getLogger()
-    root.addHandler(file_handler)
+    services.setup_launcher_log(cfg)
 
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, _on_signal)

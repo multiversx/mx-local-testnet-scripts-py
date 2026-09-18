@@ -13,6 +13,31 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import proc
 
 
+class _FastHTTPServer:
+    """ThreadingHTTPServer that skips getfqdn() reverse-DNS on bind.
+
+    http.server resolves the bind address via getfqdn(), which stalls for
+    tens of seconds on machines with broken DNS. Tests only need IP:port.
+    """
+
+    pass
+
+
+def _make_fast_http_server(handler_class):
+    """Return a ThreadingHTTPServer subclass using *handler_class*."""
+    from http.server import ThreadingHTTPServer
+    import socketserver
+
+    class FastHTTPServer(ThreadingHTTPServer):
+        def server_bind(self):
+            socketserver.TCPServer.server_bind(self)
+            host, port = self.socket.getsockname()[:2]
+            self.server_name = host
+            self.server_port = port
+
+    return FastHTTPServer
+
+
 class NameTest(unittest.TestCase):
     def test_validator_index(self):
         self.assertEqual(proc.validator_index_from_name("validator0"), 0)
@@ -341,7 +366,7 @@ class StatusDetailsTest(unittest.TestCase):
         import dataclasses
         import json
         import threading
-        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from http.server import BaseHTTPRequestHandler
         import status as status_mod
 
         payload = {"data": {"metrics": {
@@ -363,17 +388,7 @@ class StatusDetailsTest(unittest.TestCase):
             def log_message(self, *args):
                 pass
 
-        class FastHTTPServer(ThreadingHTTPServer):
-            # http.server resolves the bind address via getfqdn(), i.e. a
-            # reverse-DNS lookup that stalls for tens of seconds on
-            # machines with broken DNS. Skip it; tests only need IP:port.
-            def server_bind(self):
-                import socketserver
-                socketserver.TCPServer.server_bind(self)
-                host, port = self.socket.getsockname()[:2]
-                self.server_name = host
-                self.server_port = port
-
+        FastHTTPServer = _make_fast_http_server(Handler)
         server = FastHTTPServer(("127.0.0.1", 0), Handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -400,8 +415,7 @@ class StatusDetailsTest(unittest.TestCase):
         import dataclasses
         import json
         import threading
-        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-        import socketserver
+        from http.server import BaseHTTPRequestHandler
         import status as status_mod
 
         class Handler(BaseHTTPRequestHandler):
@@ -421,13 +435,7 @@ class StatusDetailsTest(unittest.TestCase):
             def log_message(self, *args):
                 pass
 
-        class FastHTTPServer(ThreadingHTTPServer):
-            def server_bind(self):
-                socketserver.TCPServer.server_bind(self)
-                host, port = self.socket.getsockname()[:2]
-                self.server_name = host
-                self.server_port = port
-
+        FastHTTPServer = _make_fast_http_server(Handler)
         server = FastHTTPServer(("127.0.0.1", 0), Handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()

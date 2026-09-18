@@ -118,15 +118,20 @@ def probe_http_json(url: str, timeout: float = PROBE_TIMEOUT):
         return False, str(exc) or type(exc).__name__
 
 
-def node_liveness(payload: object) -> str:
-    """Render ``round=.. nonce=.. epoch=..`` from a /node/status payload."""
-    metrics = {}
+def _extract_metrics(payload: object) -> dict:
+    """Walk the ``{"data": {"metrics": {...}}}`` envelope, return metrics dict."""
     if isinstance(payload, dict):
         data = payload.get("data")
         if isinstance(data, dict):
             inner = data.get("metrics")
             if isinstance(inner, dict):
-                metrics = inner
+                return inner
+    return {}
+
+
+def node_liveness(payload: object) -> str:
+    """Render ``round=.. nonce=.. epoch=..`` from a /node/status payload."""
+    metrics = _extract_metrics(payload)
     parts = []
     for label, keys in _METRIC_KEYS:
         value = "-"
@@ -140,13 +145,7 @@ def node_liveness(payload: object) -> str:
 
 def node_shard_id(payload: object):
     """Shard id the node reports about itself (``erd_shard_id``), or None."""
-    metrics = {}
-    if isinstance(payload, dict):
-        data = payload.get("data")
-        if isinstance(data, dict):
-            inner = data.get("metrics")
-            if isinstance(inner, dict):
-                metrics = inner
+    metrics = _extract_metrics(payload)
     value = metrics.get("erd_shard_id")
     if isinstance(value, bool):
         return None
